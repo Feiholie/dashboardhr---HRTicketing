@@ -1,395 +1,177 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HRFlow - Admin Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Library untuk Export Excel -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; }
-        .glass-card { background: white; border: 1px solid #e2e8f0; transition: all 0.3s ease; }
-        .glass-card:hover { border-color: #cbd5e1; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05); }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-        
-        /* Modal Animation */
-        .modal-enter { opacity: 0; transform: scale(0.95); }
-        .modal-active { opacity: 1; transform: scale(1); transition: all 0.3s ease-out; }
-    </style>
-</head>
-<body class="bg-slate-50 min-h-screen p-4 md:p-8">
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-analytics.js";
+import { 
+  getFirestore, collection, addDoc, onSnapshot, 
+  updateDoc, deleteDoc, doc, getDocs 
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-    <div class="max-w-7xl mx-auto">
-        <!-- Header Section -->
-        <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
-            <div class="flex items-center gap-3">
-                <div class="bg-slate-900 p-2.5 rounded-2xl text-white shadow-xl shadow-slate-900/10">
-                    <i data-lucide="layout-dashboard"></i>
-                </div>
-                <div>
-                    <h1 class="text-2xl font-extrabold tracking-tight">HR Dashboard</h1>
-                    <div class="flex items-center gap-2">
-                        <span class="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded font-black uppercase tracking-widest">Admin Control</span>
-                        <p class="text-[10px] uppercase font-black text-slate-400 tracking-widest">Enterprise Edition</p>
+// ================= FIREBASE CONFIG =================
+const firebaseConfig = {
+  apiKey: "AIzaSyCPBQQZSyWxfusvbkwUmWUWFkVTHz_5wnE",
+  authDomain: "hrticketing-program.firebaseapp.com",
+  projectId: "hrticketing-program",
+  storageBucket: "hrticketing-program.firebasestorage.app",
+  messagingSenderId: "701523833641",
+  appId: "1:701523833641:web:884cba2ec7759a9ae07d38",
+  measurementId: "G-Q67YZR56W5"
+};
+
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const db = getFirestore(app);
+
+// ================= GLOBAL =================
+let selectedTicketId = null;
+let globalTickets = [];
+let globalActivities = [];
+
+// ================= REALTIME LISTENER =================
+onSnapshot(collection(db, "tickets"), (snapshot) => {
+    globalTickets = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+    }));
+    renderAll();
+});
+
+onSnapshot(collection(db, "activities"), (snapshot) => {
+    globalActivities = snapshot.docs.map(doc => doc.data());
+    renderAll();
+});
+
+// ================= RENDER =================
+function renderAll() {
+    const tickets = globalTickets;
+    const activities = globalActivities;
+
+    // Stats
+    document.getElementById('totalTiket').innerText = tickets.length;
+    document.getElementById('totalPending').innerText = tickets.filter(t => t.status === 'Pending').length;
+    document.getElementById('totalDone').innerText = tickets.filter(t => t.status === 'Done').length;
+
+    const tbody = document.getElementById('tableBody');
+    const empty = document.getElementById('emptyMsg');
+
+    if(tickets.length === 0) {
+        tbody.innerHTML = '';
+        empty.classList.remove('hidden');
+    } else {
+        empty.classList.add('hidden');
+        tbody.innerHTML = tickets.map(t => `
+            <tr class="hover:bg-slate-50/80 transition-colors group">
+                <td class="px-6 py-5">
+                    <div class="flex flex-col">
+                        <span class="text-[10px] font-black text-blue-600 uppercase">${t.id}</span>
+                        <span class="font-bold text-slate-800 text-base">${t.employeeName}</span>
+                        <span class="text-[10px] text-slate-400">${t.date || '-'}</span>
                     </div>
-                </div>
+                </td>
+                <td class="px-6 py-5">
+                    <span>${t.division}</span><br>
+                    <span class="text-xs">${t.category}</span>
+                </td>
+                <td class="px-6 py-5">
+                    <span>${t.status}</span>
+                    ${t.hrNote ? `<p class="text-[9px] text-slate-400">Note: ${t.hrNote}</p>` : ''}
+                </td>
+                <td class="px-6 py-5 text-right">
+                    <button onclick="openNoteModal('${t.id}')">Note</button>
+                    <button onclick="setStatus('${t.id}','On Progress')">Proses</button>
+                    <button onclick="setStatus('${t.id}','Done')">Done</button>
+                    <button onclick="deleteTicket('${t.id}')">Hapus</button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    // Activity
+    const logBox = document.getElementById('activityLog');
+    if(activities.length === 0){
+        logBox.innerHTML = 'Belum ada aktivitas';
+    } else {
+        logBox.innerHTML = activities.map(a => `
+            <div>
+                <p>${a.text}</p>
+                <small>${a.time}</small>
             </div>
-            <div class="flex gap-2">
-                <button onclick="clearAllData()" class="px-4 py-2 text-[10px] font-black uppercase text-red-500 border border-red-100 rounded-xl hover:bg-red-50 transition">Reset Database</button>
-                <div class="px-4 py-2 bg-white border rounded-xl flex items-center gap-2 shadow-sm">
-                    <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                    <span class="text-[10px] font-black uppercase text-slate-600">Live Sync Aktif</span>
-                </div>
-            </div>
-        </header>
+        `).join('');
+    }
 
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <!-- Left Side: Stats and Main Table -->
-            <div class="lg:col-span-8 space-y-8">
-                
-                <!-- Stat Cards -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="glass-card p-6 rounded-[2rem]">
-                        <div class="flex justify-between items-start mb-4">
-                            <div class="p-2 bg-slate-50 rounded-lg"><i data-lucide="layers" size="18" class="text-slate-600"></i></div>
-                        </div>
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Tiket</p>
-                        <h2 id="totalTiket" class="text-3xl font-black mt-1">0</h2>
-                    </div>
-                    <div class="glass-card p-6 rounded-[2rem] border-b-4 border-b-red-500">
-                        <div class="flex justify-between items-start mb-4">
-                            <div class="p-2 bg-red-50 rounded-lg"><i data-lucide="clock" size="18" class="text-red-500"></i></div>
-                        </div>
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tertunda (Pending)</p>
-                        <h2 id="totalPending" class="text-3xl font-black mt-1 text-red-500">0</h2>
-                    </div>
-                    <div class="glass-card p-6 rounded-[2rem] border-b-4 border-b-green-500">
-                        <div class="flex justify-between items-start mb-4">
-                            <div class="p-2 bg-green-50 rounded-lg"><i data-lucide="check-circle" size="18" class="text-green-500"></i></div>
-                        </div>
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Selesai (Done)</p>
-                        <h2 id="totalDone" class="text-3xl font-black mt-1 text-green-500">0</h2>
-                    </div>
-                </div>
+    updateInsights(tickets);
+}
 
-                <!-- Table Container -->
-                <div class="glass-card rounded-[2.5rem] overflow-hidden shadow-sm">
-                    <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-white">
-                        <h3 class="text-xs font-black uppercase tracking-widest flex items-center gap-2">
-                            <i data-lucide="list" size="16" class="text-blue-600"></i> Daftar Laporan Karyawan
-                        </h3>
-                        <div class="flex gap-4">
-                            <button class="text-[10px] font-bold text-slate-400 hover:text-blue-600 transition uppercase">Filter</button>
-                            <button onclick="exportToExcel()" class="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 transition uppercase flex items-center gap-1">
-                                <i data-lucide="download" size="12"></i> Export Excel
-                            </button>
-                        </div>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left" id="reportTable">
-                            <thead class="bg-slate-50/50 text-[10px] font-black uppercase text-slate-400 border-b border-slate-100">
-                                <tr>
-                                    <th class="px-6 py-4">Informasi Tiket</th>
-                                    <th class="px-6 py-4">Kategori & Divisi</th>
-                                    <th class="px-6 py-4">Status Saat Ini</th>
-                                    <th class="px-6 py-4 text-right">Aksi & Update</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tableBody" class="divide-y divide-slate-50 text-sm">
-                                <!-- Data rows injected by JS -->
-                            </tbody>
-                        </table>
-                    </div>
-                    <div id="emptyMsg" class="hidden py-32 text-center">
-                        <div class="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <i data-lucide="inbox" class="text-slate-300"></i>
-                        </div>
-                        <p class="text-slate-400 text-xs font-bold uppercase tracking-widest">Belum ada tiket yang masuk</p>
-                        <p class="text-[10px] text-slate-300 mt-1 italic">Data akan muncul otomatis saat karyawan mengirim tiket.</p>
-                    </div>
-                </div>
-            </div>
+// ================= FUNCTIONS =================
+window.openNoteModal = function(id) {
+    selectedTicketId = id;
+    const ticket = globalTickets.find(t => t.id === id);
 
-            <!-- Right Side: Analytics & Logs -->
-            <div class="lg:col-span-4 space-y-6">
-                <!-- Smart Insight Panel -->
-                <div class="glass-card p-8 rounded-[2.5rem] bg-slate-900 text-white shadow-2xl shadow-slate-900/20 relative overflow-hidden">
-                    <i data-lucide="sparkles" class="absolute -top-4 -right-4 w-24 h-24 text-white/5 rotate-12"></i>
-                    <h3 class="text-sm font-black uppercase mb-6 flex items-center gap-2 italic tracking-wider">
-                        <i data-lucide="brain-circuit" class="text-blue-400"></i> Insight Engine
-                    </h3>
-                    <div id="insightBox" class="space-y-4 relative z-10">
-                        <!-- AI Insights injected here -->
-                    </div>
-                </div>
+    document.getElementById('modalTicketId').innerText = `ID: ${id}`;
+    document.getElementById('hrNoteInput').value = ticket?.hrNote || '';
+    document.getElementById('noteModal').classList.remove('hidden');
+}
 
-                <!-- Live Activity Feed -->
-                <div class="glass-card p-8 rounded-[2.5rem] flex flex-col h-[500px]">
-                    <div class="flex justify-between items-center mb-6">
-                        <h3 class="text-sm font-black uppercase tracking-widest">Aktivitas Terbaru</h3>
-                        <span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-                    </div>
-                    <div id="activityLog" class="space-y-5 overflow-y-auto custom-scrollbar flex-grow pr-2">
-                        <!-- Activity items injected here -->
-                    </div>
-                </div>
-            </div>
+window.closeNoteModal = function() {
+    document.getElementById('noteModal').classList.add('hidden');
+}
+
+window.saveProgressNote = async function() {
+    const note = document.getElementById('hrNoteInput').value;
+    if(!selectedTicketId) return;
+
+    const ref = doc(db, "tickets", selectedTicketId);
+    await updateDoc(ref, { hrNote: note });
+
+    logToActivity(`Progress: ${selectedTicketId}`);
+    closeNoteModal();
+}
+
+window.setStatus = async function(id, status) {
+    const ref = doc(db, "tickets", id);
+    await updateDoc(ref, { status });
+
+    logToActivity(`Status ${id} → ${status}`);
+}
+
+window.deleteTicket = async function(id) {
+    if(confirm("Hapus tiket?")) {
+        await deleteDoc(doc(db, "tickets", id));
+        logToActivity(`Hapus ${id}`);
+    }
+}
+
+async function logToActivity(text){
+    await addDoc(collection(db, "activities"), {
+        text,
+        time: new Date().toLocaleTimeString('id-ID')
+    });
+}
+
+window.clearAllData = async function() {
+    if(confirm("Hapus semua data?")) {
+        const snap = await getDocs(collection(db,"tickets"));
+        snap.forEach(d => deleteDoc(d.ref));
+
+        const act = await getDocs(collection(db,"activities"));
+        act.forEach(d => deleteDoc(d.ref));
+    }
+}
+
+// ================= INSIGHT =================
+function updateInsights(tickets) {
+    const insightBox = document.getElementById('insightBox');
+
+    if(tickets.length === 0){
+        insightBox.innerHTML = 'Menunggu data...';
+        return;
+    }
+
+    const pending = tickets.filter(t=>t.status==='Pending').length;
+
+    insightBox.innerHTML = `
+        <div>
+            <b>${pending} tiket pending</b>
         </div>
-    </div>
-
-    <!-- Modal Progress Note -->
-    <div id="noteModal" class="hidden fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-        <div class="bg-white w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden animate-fade-in">
-            <div class="p-6 bg-slate-900 text-white flex justify-between items-center">
-                <div>
-                    <h3 class="text-lg font-black italic">Berikan Progress</h3>
-                    <p id="modalTicketId" class="text-[10px] text-blue-400 font-bold uppercase tracking-widest">ID: HR-XXXX</p>
-                </div>
-                <button onclick="closeNoteModal()" class="text-slate-400 hover:text-white transition">
-                    <i data-lucide="x" size="20"></i>
-                </button>
-            </div>
-            <div class="p-8">
-                <label class="text-[10px] font-black uppercase text-slate-400 mb-2 block">Catatan untuk Karyawan</label>
-                <textarea id="hrNoteInput" rows="4" class="w-full p-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-600 outline-none text-sm font-medium" placeholder="Tuliskan perkembangan laporan di sini..."></textarea>
-                
-                <div class="mt-6 flex gap-3">
-                    <button onclick="saveProgressNote()" class="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-wider shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition active:scale-95">Simpan & Kirim</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Script Section -->
-    <script>
-        let selectedTicketId = null;
-
-        // Initializing Lucide
-        lucide.createIcons();
-
-        // Data polling to simulate real-time updates from localStorage
-        setInterval(loadData, 2000);
-        loadData();
-
-        function loadData() {
-            const tickets = JSON.parse(localStorage.getItem('hrflow_tickets')) || [];
-            const activities = JSON.parse(localStorage.getItem('hrflow_activities')) || [];
-            
-            // Updating Stats
-            document.getElementById('totalTiket').innerText = tickets.length;
-            document.getElementById('totalPending').innerText = tickets.filter(t => t.status === 'Pending').length;
-            document.getElementById('totalDone').innerText = tickets.filter(t => t.status === 'Done').length;
-
-            const tbody = document.getElementById('tableBody');
-            const empty = document.getElementById('emptyMsg');
-            
-            if(tickets.length === 0) {
-                tbody.innerHTML = '';
-                empty.classList.remove('hidden');
-            } else {
-                empty.classList.add('hidden');
-                tbody.innerHTML = tickets.map(t => `
-                    <tr class="hover:bg-slate-50/80 transition-colors group">
-                        <td class="px-6 py-5">
-                            <div class="flex flex-col">
-                                <span class="text-[10px] font-black text-blue-600 tracking-tighter uppercase mb-0.5">${t.id}</span>
-                                <span class="font-bold text-slate-800 text-base">${t.employeeName}</span>
-                                <span class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">${t.date || 'Tgl Tidak Tersedia'}</span>
-                            </div>
-                        </td>
-                        <td class="px-6 py-5">
-                            <div class="flex flex-col gap-1">
-                                <span class="text-[10px] font-black uppercase text-slate-500">${t.division}</span>
-                                <div class="flex items-center gap-1.5">
-                                    <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
-                                    <span class="text-xs font-bold text-slate-600">${t.category}</span>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="px-6 py-5">
-                            <div class="flex flex-col gap-1.5">
-                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest w-fit ${
-                                    t.status === 'Done' ? 'bg-green-50 text-green-600' : 
-                                    t.status === 'On Progress' ? 'bg-yellow-50 text-yellow-600' : 
-                                    'bg-red-50 text-red-500'
-                                }">
-                                    <span class="w-1.5 h-1.5 rounded-full ${
-                                        t.status === 'Done' ? 'bg-green-600' : 
-                                        t.status === 'On Progress' ? 'bg-yellow-600' : 
-                                        'bg-red-500'
-                                    }"></span>
-                                    ${t.status === 'On Progress' ? 'Diproses' : t.status === 'Done' ? 'Selesai' : 'Tertunda'}
-                                </span>
-                                ${t.hrNote ? `<p class="text-[9px] text-slate-400 italic line-clamp-1 max-w-[150px]">Note: ${t.hrNote}</p>` : ''}
-                            </div>
-                        </td>
-                        <td class="px-6 py-5 text-right">
-                            <div class="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onclick="openNoteModal('${t.id}')" class="p-2 hover:bg-blue-50 text-blue-600 rounded-xl transition" title="Berikan Progress">
-                                    <i data-lucide="message-square-text" size="18"></i>
-                                </button>
-                                <button onclick="setStatus('${t.id}', 'On Progress')" class="p-2 hover:bg-yellow-50 text-yellow-600 rounded-xl transition" title="Set Proses">
-                                    <i data-lucide="play-circle" size="18"></i>
-                                </button>
-                                <button onclick="setStatus('${t.id}', 'Done')" class="p-2 hover:bg-green-50 text-green-600 rounded-xl transition" title="Set Selesai">
-                                    <i data-lucide="check-circle-2" size="18"></i>
-                                </button>
-                                <button onclick="deleteTicket('${t.id}')" class="p-2 hover:bg-red-50 text-red-400 rounded-xl transition" title="Hapus">
-                                    <i data-lucide="trash-2" size="18"></i>
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                `).join('');
-                lucide.createIcons();
-            }
-
-            // Activity Log Rendering
-            const logBox = document.getElementById('activityLog');
-            if(activities.length === 0) {
-                logBox.innerHTML = '<p class="text-[10px] text-slate-300 font-bold uppercase text-center mt-10 italic tracking-widest">Belum ada aktivitas</p>';
-            } else {
-                logBox.innerHTML = activities.map(a => `
-                    <div class="flex gap-4 items-start animate-fade-in">
-                        <div class="mt-1 w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)] flex-shrink-0"></div>
-                        <div class="flex flex-col">
-                            <p class="text-xs font-bold text-slate-700 leading-tight">${a.text}</p>
-                            <p class="text-[9px] text-slate-400 font-black uppercase tracking-tighter mt-1">${a.time}</p>
-                        </div>
-                    </div>
-                `).join('');
-            }
-
-            updateInsights(tickets);
-        }
-
-        function openNoteModal(id) {
-            selectedTicketId = id;
-            const tickets = JSON.parse(localStorage.getItem('hrflow_tickets')) || [];
-            const ticket = tickets.find(t => t.id === id);
-            
-            document.getElementById('modalTicketId').innerText = `ID: ${id}`;
-            document.getElementById('hrNoteInput').value = ticket.hrNote || '';
-            document.getElementById('noteModal').classList.remove('hidden');
-            lucide.createIcons();
-        }
-
-        function closeNoteModal() {
-            document.getElementById('noteModal').classList.add('hidden');
-            selectedTicketId = null;
-        }
-
-        function saveProgressNote() {
-            const note = document.getElementById('hrNoteInput').value;
-            if(!selectedTicketId) return;
-
-            let tickets = JSON.parse(localStorage.getItem('hrflow_tickets')) || [];
-            tickets = tickets.map(t => t.id === selectedTicketId ? {...t, hrNote: note} : t);
-            localStorage.setItem('hrflow_tickets', JSON.stringify(tickets));
-
-            logToActivity(`Memberikan Progress: ${selectedTicketId}`);
-            closeNoteModal();
-            loadData();
-        }
-
-        function setStatus(id, newStatus) {
-            let tickets = JSON.parse(localStorage.getItem('hrflow_tickets')) || [];
-            tickets = tickets.map(t => t.id === id ? {...t, status: newStatus} : t);
-            localStorage.setItem('hrflow_tickets', JSON.stringify(tickets));
-            
-            logToActivity(`Update Status: ${id} menjadi ${newStatus}`);
-            loadData();
-        }
-
-        function deleteTicket(id) {
-            if(confirm(`Konfirmasi penghapusan tiket ${id}?`)) {
-                let tickets = JSON.parse(localStorage.getItem('hrflow_tickets')) || [];
-                tickets = tickets.filter(t => t.id !== id);
-                localStorage.setItem('hrflow_tickets', JSON.stringify(tickets));
-                logToActivity(`Menghapus Tiket: ${id}`);
-                loadData();
-            }
-        }
-
-        function logToActivity(msg) {
-            let activities = JSON.parse(localStorage.getItem('hrflow_activities')) || [];
-            activities.unshift({ text: msg, time: new Date().toLocaleTimeString('id-ID') });
-            localStorage.setItem('hrflow_activities', JSON.stringify(activities.slice(0, 30)));
-        }
-
-        function updateInsights(tickets) {
-            const insightBox = document.getElementById('insightBox');
-            if(tickets.length === 0) {
-                insightBox.innerHTML = '<p class="text-xs text-slate-400 italic font-medium">Menunggu data masuk untuk dianalisa...</p>';
-                return;
-            }
-
-            const pendingCount = tickets.filter(t => t.status === 'Pending').length;
-            const divisions = tickets.reduce((acc, t) => {
-                acc[t.division] = (acc[t.division] || 0) + 1;
-                return acc;
-            }, {});
-            const busiest = Object.keys(divisions).reduce((a, b) => divisions[a] > divisions[b] ? a : b);
-
-            insightBox.innerHTML = `
-                <div class="p-5 bg-white/10 rounded-3xl border border-white/5">
-                    <p class="text-[10px] text-blue-400 font-black uppercase tracking-widest mb-1">Analisa Beban</p>
-                    <p class="text-sm font-bold text-white">${pendingCount > 0 ? `Ada ${pendingCount} tiket tertunda.` : 'Semua beres! Kerja bagus.'}</p>
-                    <p class="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                        ${pendingCount > 5 ? 'Status: Overload. Perlu bantuan tim tambahan.' : 'Status: Optimal. Tim dapat menangani volume ini.'}
-                    </p>
-                </div>
-                <div class="p-5 bg-white/10 rounded-3xl border border-white/5">
-                    <p class="text-[10px] text-blue-400 font-black uppercase tracking-widest mb-1">Dept. Paling Aktif</p>
-                    <p class="text-sm font-bold text-white">Divisi ${busiest}</p>
-                    <p class="text-[10px] text-slate-400 mt-2">Menyumbang ${divisions[busiest]} laporan dalam database.</p>
-                </div>
-            `;
-        }
-
-        function clearAllData() {
-            if(confirm("PERINGATAN: Hapus seluruh data tiket dan log aktivitas secara permanen?")) {
-                localStorage.removeItem('hrflow_tickets');
-                localStorage.removeItem('hrflow_activities');
-                loadData();
-            }
-        }
-
-        function exportToExcel() {
-            const tickets = JSON.parse(localStorage.getItem('hrflow_tickets')) || [];
-            if(tickets.length === 0) {
-                alert("Tidak ada data untuk diekspor.");
-                return;
-            }
-
-            // Transform data untuk format Excel yang rapi
-            const dataToExport = tickets.map(t => ({
-                'ID Tiket': t.id,
-                'Tanggal': t.date,
-                'Nama Karyawan': t.employeeName,
-                'Divisi': t.division,
-                'Kategori': t.category,
-                'Deskripsi Kendala': t.description,
-                'Status': t.status,
-                'Catatan HR': t.hrNote || '-'
-            }));
-
-            // Menggunakan library XLSX
-            const worksheet = XLSX.utils.json_to_sheet(dataToExport);
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan Tiket HR");
-
-            // Simpan file
-            const dateStr = new Date().toISOString().split('T')[0];
-            XLSX.writeFile(workbook, `HRFlow_Report_${dateStr}.xlsx`);
-            
-            logToActivity("Mengekspor laporan ke Excel");
-        }
-    </script>
-</body>
-</html>
+    `;
+}
+</script>
